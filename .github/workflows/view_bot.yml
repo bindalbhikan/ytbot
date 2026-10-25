@@ -1,0 +1,88 @@
+name: YouTube View Booster
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      views:
+        description: 'Number of views to boost'
+        required: true
+        default: '5'
+      watch_time:
+        description: 'Watch duration per view (seconds)'
+        required: true
+        default: '35'
+      telegram_chat_id:
+        description: 'Optional Telegram Chat ID override'
+        required: false
+        default: ''
+
+  repository_dispatch:
+    types: [boost_views]
+
+jobs:
+  boost-views:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Tor Service
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tor
+          # Configure Tor ControlPort 9051 without password for automated rotation
+          sudo bash -c 'cat <<EOF > /etc/tor/torrc
+          SocksPort 9050
+          ControlPort 9051
+          CookieAuthentication 0
+          EOF'
+          sudo systemctl restart tor
+          sleep 5
+          # Verify Tor is active
+          curl --socks5-hostname 127.0.0.1:9050 https://api.ipify.org && echo ""
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium & System Dependencies
+        run: |
+          playwright install chromium --with-deps
+
+      - name: Execute View Booster
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ github.event.inputs.telegram_chat_id || github.event.client_payload.telegram_chat_id || secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          TARGET_URL="${{ github.event.inputs.video_url || github.event.client_payload.video_url || '' }}"
+          TARGET_VIEWS="${{ github.event.inputs.views || github.event.client_payload.views || '5' }}"
+          TARGET_TIME="${{ github.event.inputs.watch_time || github.event.client_payload.watch_time || '35' }}"
+
+          echo "Target URL: $TARGET_URL"
+          echo "Views: $TARGET_VIEWS"
+          echo "Watch Time: $TARGET_TIME"
+
+          python core_bot.py \
+            --url "$TARGET_URL" \
+            --views "$TARGET_VIEWS" \
+            --watch-time "$TARGET_TIME"
+
+      - name: Upload Bot Stats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-run-stats
+          path: bot_stats.json

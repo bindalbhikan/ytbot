@@ -1,0 +1,9 @@
+name = "ytbot-telegram-gateway"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GITHUB_REPO = "bindalbhikan/ytbot"
+# Add TELEGRAM_BOT_TOKEN and GITHUB_PAT as Cloudflare Secrets or in dashboard:
+# wrangler secret put TELEGRAM_BOT_TOKEN
+# wrangler secret put GITHUB_PAT
