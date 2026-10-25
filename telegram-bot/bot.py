@@ -90,13 +90,15 @@ def handle_update(update: dict):
 
     if text.startswith("/start") or text.startswith("/help"):
         welcome = (
-            "👋 <b>Welcome to YouTube View Booster Bot!</b>\n\n"
-            "I trigger automated runs on <b>GitHub Actions</b> with real headless Chromium + Tor IP rotation.\n\n"
+            "👋 <b>Welcome to YouTube View Booster Bot (Multi-Threaded)!</b>\n\n"
+            "I trigger automated runs on <b>GitHub Actions</b> with parallel headless Chromium + Tor Stream Isolation (Multi-IP).\n\n"
             "<b>Commands:</b>\n"
-            "🔹 <code>/boost &lt;video_url&gt; [views] [watch_seconds]</code>\n"
+            "🔹 <code>/boost &lt;video_url&gt; [views] [watch_seconds] [threads]</code>\n"
             "🔹 <code>/status</code> - Show status\n\n"
-            "<b>Example:</b>\n"
-            "<code>/boost https://www.youtube.com/watch?v=dQw4w9WgXcQ 5 35</code>"
+            "<b>Examples:</b>\n"
+            "⚡ Fast View (3-5s): <code>/boost https://youtu.be/d2Wg5jdK5jE 50 3 3</code>\n"
+            "🎯 Regular View (30s): <code>/boost https://youtu.be/d2Wg5jdK5jE 20 30 3</code>\n\n"
+            "<i>Defaults: views = 10, watch time = 3s, threads = 3 parallel browsers.</i>"
         )
         send_message(chat_id, welcome)
         return

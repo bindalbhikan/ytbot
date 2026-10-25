@@ -29,14 +29,15 @@ export default {
       // Command: /start or /help
       if (text.startsWith("/start") || text.startsWith("/help")) {
         const welcomeText = 
-          `👋 <b>Welcome to YouTube View Booster Bot!</b>\n\n` +
-          `I trigger cloud-based automated views via <b>GitHub Actions</b> using headless Chromium and Tor IP rotation.\n\n` +
+          `👋 <b>Welcome to YouTube View Booster Bot (Multi-Threaded)!</b>\n\n` +
+          `I trigger cloud-based automated views via <b>GitHub Actions</b> using parallel headless Chromium browsers and <b>Tor Stream Isolation (Multi-IP)</b>.\n\n` +
           `<b>Available Commands:</b>\n` +
-          `🔹 <code>/boost &lt;video_url&gt; [views] [watch_seconds]</code>\n` +
+          `🔹 <code>/boost &lt;video_url&gt; [views] [watch_seconds] [threads]</code>\n` +
           `🔹 <code>/status</code> - Show workflow info\n\n` +
-          `<b>Example:</b>\n` +
-          `<code>/boost https://www.youtube.com/watch?v=dQw4w9WgXcQ 5 35</code>\n\n` +
-          `<i>Note: Default views = 5, default watch time = 35s.</i>`;
+          `<b>Examples:</b>\n` +
+          `⚡ Fast View (3-5s): <code>/boost https://youtu.be/d2Wg5jdK5jE 50 3 3</code>\n` +
+          `🎯 Regular View (30s): <code>/boost https://youtu.be/d2Wg5jdK5jE 20 30 3</code>\n\n` +
+          `<i>Defaults: views = 10, watch time = 3s, threads = 3 parallel browsers (different Tor IPs).</i>`;
 
         await sendTelegramMessage(botToken, chatId, welcomeText);
         return new Response("OK", { status: 200 });
