@@ -8,15 +8,15 @@ on:
         required: true
         default: 'https://www.youtube.com/watch?v=d2Wg5jdK5jE'
       views:
-        description: 'Number of views to boost'
+        description: 'Total views to boost across all matrix runners'
         required: true
-        default: '10'
+        default: '12'
       watch_time:
         description: 'Watch duration per view (seconds)'
         required: true
         default: '35'
       threads:
-        description: 'Concurrent Browser Threads (Multi-IP)'
+        description: 'Concurrent Browser Threads per runner'
         required: false
         default: '3'
       telegram_chat_id:
@@ -32,6 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
+    # 4. Multi-Runner Matrix (3 Parallel Cloud Runners = 9 Simultaneous Browsers!)
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_id: [1, 2, 3]
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -40,8 +46,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tor curl
-          # Configure Tor with Stream Isolation (different IP per SOCKS auth user)
-          # Exclude heavily abused / blacklisted hosting subnets (Austria EDIS, Czechia, etc.)
+          
+          # Configure Tor with Stream Isolation & Exclude heavily flagged subnets
           sudo bash -c 'cat <<EOF > /etc/tor/torrc
           SocksPort 9050 IsolateSOCKSAuth
           ControlPort 9051
@@ -51,10 +57,18 @@ jobs:
           NewCircuitPeriod 15
           MaxCircuitDirtiness 30
           EOF'
+          
           sudo systemctl restart tor
-          sleep 4
-          # Verify Tor is operational
-          curl --socks5-hostname 127.0.0.1:9050 https://api.ipify.org && echo ""
+
+          # Robust Tor Bootstrap Wait Loop (Fixes curl 97 exit code crash)
+          echo "Waiting for Tor circuit bootstrap..."
+          for i in {1..30}; do
+            if curl -s --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip > /dev/null 2>&1; then
+              echo "Tor circuit is active and ready!"
+              break
+            fi
+            sleep 2
+          done
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,39 +76,45 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies & Undetected Engine
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Playwright Chromium & System Dependencies
+      - name: Install Undetected Chromium Engine & Dependencies
         run: |
-          playwright install chromium --with-deps
+          patchright install chromium --with-deps || playwright install chromium --with-deps
 
-      - name: Execute Multi-Threaded View Booster
+      - name: Execute Ultra-Advanced View Booster
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ github.event.inputs.telegram_chat_id || github.event.client_payload.telegram_chat_id || secrets.TELEGRAM_CHAT_ID }}
         run: |
           TARGET_URL="${{ github.event.inputs.video_url || github.event.client_payload.video_url || '' }}"
-          TARGET_VIEWS="${{ github.event.inputs.views || github.event.client_payload.views || '10' }}"
-          TARGET_TIME="${{ github.event.inputs.watch_time || github.event.client_payload.watch_time || '3' }}"
+          RAW_VIEWS="${{ github.event.inputs.views || github.event.client_payload.views || '12' }}"
+          TARGET_TIME="${{ github.event.inputs.watch_time || github.event.client_payload.watch_time || '35' }}"
           TARGET_THREADS="${{ github.event.inputs.threads || github.event.client_payload.threads || '3' }}"
 
+          # Distribute views across 3 matrix runners
+          TOTAL_VIEWS=$((RAW_VIEWS))
+          VIEWS_PER_RUNNER=$(( (TOTAL_VIEWS + 2) / 3 ))
+
           echo "Target URL: $TARGET_URL"
-          echo "Views: $TARGET_VIEWS"
+          echo "Total Views Requested: $TOTAL_VIEWS"
+          echo "Runner #${{ matrix.runner_id }} Allocated Views: $VIEWS_PER_RUNNER"
           echo "Watch Time: $TARGET_TIME"
-          echo "Threads: $TARGET_THREADS"
+          echo "Threads per runner: $TARGET_THREADS"
 
           python core_bot.py \
             --url "$TARGET_URL" \
-            --views "$TARGET_VIEWS" \
+            --views "$VIEWS_PER_RUNNER" \
             --watch-time "$TARGET_TIME" \
-            --threads "$TARGET_THREADS"
+            --threads "$TARGET_THREADS" \
+            --runner-id "${{ matrix.runner_id }}"
 
       - name: Upload Bot Stats
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bot-run-stats
-          path: bot_stats.json
+          name: bot-run-stats-runner-${{ matrix.runner_id }}
+          path: bot_stats_runner_${{ matrix.runner_id }}.json
