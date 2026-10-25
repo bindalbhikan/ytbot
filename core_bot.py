@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-YouTube View Bot Core Engine - Multi-Threaded Edition
-- Multi-threaded parallel browsers (ThreadPoolExecutor)
-- Tor Stream Isolation: Distinct public IP per thread via SOCKS authentication isolation
-- 2-4s Fast View Optimization: Playback rate acceleration (2x), random micro-jitter, view ping triggers
-- Thread-safe Telegram reporting
+YouTube View Bot Core Engine - Honest & Rigorous Verification Edition
+- Strict Video Playback Verification: Measures continuous video.currentTime progression
+- Real Bot Detection Monitoring: Detects "Sign in to confirm", CAPTCHAs, error screens
+- Dynamic Timezone & Locale Alignment: Matches browser timezone/locale to Tor exit node IP geo
+- Realistic 1.0x Playback Simulation: Normal speed, active viewport, human micro-interactions
+- Zero Fake Success / Zero Fake IPs: Accurate telemetry reported to Telegram
 """
 
 import os
@@ -49,6 +50,14 @@ VIEWPORTS = [
     {"width": 1536, "height": 864},
     {"width": 1440, "height": 900},
     {"width": 1280, "height": 720}
+]
+
+BOT_DETECTION_PATTERNS = [
+    "Sign in to confirm you're not a bot",
+    "Sign in to confirm you’re not a bot",
+    "Our systems have detected unusual traffic",
+    "Please solve this puzzle so we know you are a real person",
+    "Video unavailable"
 ]
 
 
@@ -98,70 +107,64 @@ class TelegramReporter:
 
 
 class TorManager:
-    """Manages Tor ControlPort and Stream Isolation for Multi-IP."""
+    """Manages Tor SOCKS5 and Stream Isolation with Geolocation Discovery."""
     def __init__(self, control_port: int = 9051, socks_port: int = 9050, password: str = None):
         self.control_port = control_port
         self.socks_port = socks_port
         self.password = password or os.environ.get("TOR_CONTROL_PASSWORD", "")
 
     def get_isolated_proxy(self) -> tuple[str, str]:
-        """
-        Tor Stream Isolation:
-        By passing unique SOCKS credentials to Tor SOCKS5, Tor isolates
-        each stream and assigns a DIFFERENT circuit / exit node (distinct IP) to each thread!
-        """
         user = f"iso_{random.randint(100000, 999999)}"
         pwd = "pwd"
         proxy_url = f"socks5://{user}:{pwd}@127.0.0.1:{self.socks_port}"
         return proxy_url, user
 
-    def rotate_global_circuit(self):
-        """Sends NEWNYM signal to force Tor daemon to build new circuits."""
+    def fetch_ip_geo(self, proxy_url: str) -> dict:
+        """
+        Fetches the public IP, Country, and Timezone of the Tor circuit.
+        Returns empty dict if lookup fails (NO FAKE DATA).
+        """
+        # Try ip-api.com via curl through Tor SOCKS proxy
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(5)
-            s.connect(("127.0.0.1", self.control_port))
-            auth = f'AUTHENTICATE "{self.password}"\r\n' if self.password else 'AUTHENTICATE ""\r\n'
-            s.sendall(auth.encode('utf-8'))
-            resp = s.recv(1024).decode('utf-8', errors='ignore')
-            if "250" in resp:
-                s.sendall(b'SIGNAL NEWNYM\r\nQUIT\r\n')
-                logger.info("Signal NEWNYM sent to Tor ControlPort.")
-            s.close()
-        except Exception as e:
-            logger.debug(f"Tor socket control notice: {e}")
-
-    def get_public_ip(self, proxy_url: str) -> str:
-        """Fetch the public IP assigned to this isolated SOCKS proxy."""
-        # 1. Native curl with socks5-hostname
-        try:
+            proxy_clean = proxy_url.replace("socks5://", "")
             cmd = [
-                "curl", "-s", "--socks5-hostname", proxy_url.replace("socks5://", ""),
-                "--max-time", "8", "https://api.ipify.org"
+                "curl", "-s", "--socks5-hostname", proxy_clean,
+                "--max-time", "12", "http://ip-api.com/json"
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            ip = res.stdout.strip()
-            if ip and len(ip) <= 45 and ("." in ip or ":" in ip):
-                return ip
-        except Exception:
-            pass
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                if data.get("status") == "success":
+                    return {
+                        "ip": data.get("query", "Unknown"),
+                        "country": data.get("country", "Unknown"),
+                        "country_code": data.get("countryCode", "US"),
+                        "timezone": data.get("timezone", "UTC")
+                    }
+        except Exception as e:
+            logger.debug(f"curl ip-api lookup error: {e}")
 
-        # 2. Python requests with socks5h
+        # Fallback to simple ipify (IP only)
         try:
-            proxies = {"http": proxy_url.replace("socks5://", "socks5h://"),
-                       "https": proxy_url.replace("socks5://", "socks5h://")}
-            res = requests.get("https://api.ipify.org", proxies=proxies, timeout=8)
-            if res.status_code == 200:
-                ip = res.text.strip().split("\n")[0].strip()
-                if ip:
-                    return ip
+            proxies = {
+                "http": proxy_url.replace("socks5://", "socks5h://"),
+                "https": proxy_url.replace("socks5://", "socks5h://")
+            }
+            res = requests.get("https://api.ipify.org", proxies=proxies, timeout=10)
+            if res.status_code == 200 and res.text.strip():
+                return {
+                    "ip": res.text.strip(),
+                    "country": "Unknown",
+                    "country_code": "US",
+                    "timezone": "UTC"
+                }
         except Exception:
             pass
 
-        return "TorExit-" + str(random.randint(100, 999))
+        return {}
 
 
-class MultiThreadedViewBot:
+class RigorousYouTubeViewBot:
     def __init__(
         self,
         tor_manager: TorManager,
@@ -179,21 +182,56 @@ class MultiThreadedViewBot:
             "total_views_requested": 0,
             "successful_views": 0,
             "failed_views": 0,
+            "blocked_by_bot_detection": 0,
             "ips_used": [],
             "start_time": None,
             "end_time": None
         }
 
-    def _apply_stealth(self, page):
+    def _apply_clean_stealth(self, page):
+        """Standard, non-suspicious anti-detection script (no fake plugin arrays)."""
         stealth_js = """
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        window.chrome = { runtime: {} };
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        // Overwrite webdriver property cleanly
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+        // Mock chrome object
+        if (!window.chrome) {
+            window.chrome = { runtime: {} };
+        }
         """
         page.add_init_script(stealth_js)
 
+    def _check_bot_detection(self, page) -> str:
+        """Inspects DOM for YouTube bot verification, captcha, or error overlays."""
+        # 1. Check for known error / enforcement elements
+        error_selectors = [
+            'ytd-enforcement-message-view-model',
+            '#error-screen',
+            '.ytp-error',
+            '#captcha-form'
+        ]
+        for sel in error_selectors:
+            try:
+                el = page.locator(sel).first
+                if el.is_visible(timeout=1500):
+                    return f"Error element detected: {sel}"
+            except Exception:
+                continue
+
+        # 2. Check for text signatures in page content
+        try:
+            content = page.content()
+            for pattern in BOT_DETECTION_PATTERNS:
+                if pattern in content:
+                    return f"Bot detection text: '{pattern}'"
+        except Exception:
+            pass
+
+        return ""
+
     def _handle_consent(self, page):
+        """Clicks Accept/Reject on YouTube GDPR consent if present."""
         consent_selectors = [
             'button[aria-label*="Reject"]',
             'button[aria-label*="Accept"]',
@@ -212,22 +250,30 @@ class MultiThreadedViewBot:
             except Exception:
                 continue
 
-    def simulate_single_view(self, view_idx: int, total_views: int, video_id: str, base_watch_time: float) -> bool:
-        # 1. Tor Stream Isolation: Get distinct IP for this thread
+    def simulate_single_view(self, view_idx: int, total_views: int, video_id: str, target_watch_time: float) -> bool:
+        # 1. Tor Stream Isolation & Geo Lookup
         proxy_url, iso_user = self.tor.get_isolated_proxy()
-        thread_ip = self.tor.get_public_ip(proxy_url)
+        geo_data = self.tor.fetch_ip_geo(proxy_url)
+
+        # STRICT: If Tor exit IP cannot be fetched, do NOT invent fake IP. Fail immediately.
+        if not geo_data or not geo_data.get("ip"):
+            logger.warning(f"[{view_idx}/{total_views}] SOCKS IP lookup failed. Circuit dropped.")
+            with self.lock:
+                self.stats["failed_views"] += 1
+            return False
+
+        thread_ip = geo_data["ip"]
+        tz_id = geo_data.get("timezone", "UTC")
+        country = geo_data.get("country", "Unknown")
+        locale = f"{geo_data.get('country_code', 'US').lower()}-{geo_data.get('country_code', 'US')}"
 
         with self.lock:
             self.stats["ips_used"].append(thread_ip)
 
-        # 2. Fast View Optimization (2-4s dynamic range):
-        # Instead of fixed 2.0s, randomize between [base_time, base_time + 1.8s]
-        actual_watch_seconds = round(random.uniform(base_watch_time, base_watch_time + 2.0), 2)
-
         ua = random.choice(USER_AGENTS)
         vp = random.choice(VIEWPORTS)
 
-        logger.info(f"[{view_idx}/{total_views}] Launching view | IP: {thread_ip} | Watch: {actual_watch_seconds}s")
+        logger.info(f"[{view_idx}/{total_views}] Launching browser | IP: {thread_ip} ({country}, {tz_id}) | Target Watch: {target_watch_time}s")
 
         with sync_playwright() as p:
             browser = None
@@ -240,42 +286,58 @@ class MultiThreadedViewBot:
                         "--disable-setuid-sandbox",
                         "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
-                        "--disable-accelerated-2d-canvas",
                         "--no-first-run",
                         "--no-zygote",
-                        "--mute-audio",
                     ]
                 )
 
+                # Dynamically set timezone & locale matching Tor exit node
                 context = browser.new_context(
                     user_agent=ua,
                     viewport=vp,
-                    locale="en-US",
-                    timezone_id="America/New_York",
+                    locale=locale,
+                    timezone_id=tz_id,
                     color_scheme="dark"
                 )
 
                 page = context.new_page()
-                self._apply_stealth(page)
+                self._apply_clean_stealth(page)
 
                 target_url = f"https://www.youtube.com/watch?v={video_id}"
                 try:
-                    page.goto(target_url, wait_until="domcontentloaded", timeout=35000)
+                    page.goto(target_url, wait_until="domcontentloaded", timeout=40000)
                 except Exception as e:
-                    logger.debug(f"[{view_idx}] Domcontentloaded notice: {e}")
+                    logger.debug(f"[{view_idx}] domcontentloaded notice: {e}")
 
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(2000)
                 self._handle_consent(page)
 
-                # 3. Fast View Hack: Accelerate playback to 2x speed
-                # This causes YouTube's player to digest 2x video frames in the short duration!
+                # 2. Check for Bot Block / Captcha immediately after page load
+                block_reason = self._check_bot_detection(page)
+                if block_reason:
+                    logger.warning(f"[{view_idx}/{total_views}] ❌ BOT DETECTED: {block_reason}")
+                    with self.lock:
+                        self.stats["failed_views"] += 1
+                        self.stats["blocked_by_bot_detection"] += 1
+                    browser.close()
+                    msg = (
+                        f"⚠️ <b>View Blocked [{view_idx}/{total_views}]</b>\n"
+                        f"🌐 <b>IP:</b> <code>{thread_ip}</code> ({country})\n"
+                        f"🛑 <b>Reason:</b> YouTube Bot Detection / Captcha\n"
+                        f"<i>(Tor Exit Node was flagged by Google)</i>"
+                    )
+                    self.tg.send_message(msg)
+                    return False
+
+                # 3. Initialize Video Playback at Realistic 1.0x Speed
                 try:
                     page.wait_for_selector("video", timeout=12000)
                     page.evaluate("""() => {
                         const v = document.querySelector('video');
                         if (v) {
-                            v.muted = true;
-                            v.playbackRate = 2.0; // 2x playback speed
+                            v.muted = false;
+                            v.volume = 0.4; // 40% volume (natural)
+                            v.playbackRate = 1.0; // 1.0x natural speed
                             v.play();
                         }
                     }""")
@@ -285,43 +347,82 @@ class MultiThreadedViewBot:
                     except Exception:
                         pass
 
-                # Simulate watch duration with micro human interaction
-                start_watch = time.time()
-                while time.time() - start_watch < actual_watch_seconds:
-                    page.wait_for_timeout(random.randint(600, 1200))
-                    page.mouse.wheel(0, random.randint(-80, 120))
-
-                # Verify play progress
-                played_time = 0.0
+                # Record baseline currentTime
+                initial_time = 0.0
                 try:
-                    played_time = page.evaluate("() => document.querySelector('video')?.currentTime || 0")
+                    initial_time = page.evaluate("() => document.querySelector('video')?.currentTime || 0")
                 except Exception:
                     pass
+
+                # 4. Watch Loop: Monitor real continuous playback progression
+                start_watch = time.time()
+                last_recorded_time = initial_time
+                stall_count = 0
+
+                while time.time() - start_watch < target_watch_time:
+                    page.wait_for_timeout(random.randint(3000, 5000))
+                    
+                    # Check again if bot block screen popped up mid-play
+                    mid_block = self._check_bot_detection(page)
+                    if mid_block:
+                        logger.warning(f"[{view_idx}] Blocked mid-watch: {mid_block}")
+                        with self.lock:
+                            self.stats["failed_views"] += 1
+                            self.stats["blocked_by_bot_detection"] += 1
+                        browser.close()
+                        return False
+
+                    # Natural human micro-scroll
+                    page.mouse.wheel(0, random.randint(-40, 60))
+
+                    # Verify video currentTime is actually advancing
+                    try:
+                        current_video_time = page.evaluate("() => document.querySelector('video')?.currentTime || 0")
+                        if current_video_time <= last_recorded_time:
+                            stall_count += 1
+                        else:
+                            stall_count = 0
+                            last_recorded_time = current_video_time
+                    except Exception:
+                        pass
+
+                    # If video stopped advancing for 3 consecutive checks (video stalled/buffering/blocked)
+                    if stall_count >= 3:
+                        logger.warning(f"[{view_idx}] Video playback stalled at {last_recorded_time:.1f}s.")
+                        break
+
+                # 5. STRICT VERIFICATION: Measure actual streamed duration
+                actual_streamed = last_recorded_time - initial_time
+                logger.info(f"[{view_idx}] Final Streamed Time: {actual_streamed:.2f}s (Target: {target_watch_time}s)")
 
                 context.close()
                 browser.close()
 
-                with self.lock:
-                    self.completed_count += 1
-                    self.stats["successful_views"] += 1
-                    current_done = self.completed_count
+                # ONLY declare success if video ACTUALLY advanced by at least 70% of requested watch duration!
+                required_minimum = max(2.0, target_watch_time * 0.7)
+                if actual_streamed >= required_minimum:
+                    with self.lock:
+                        self.completed_count += 1
+                        self.stats["successful_views"] += 1
+                        current_done = self.completed_count
 
-                logger.info(f"✅ [{current_done}/{total_views}] Done! IP: {thread_ip} | Played: {played_time:.1f}s")
-                
-                # Report milestone to Telegram (every view or periodic)
-                if current_done % 1 == 0 or current_done == total_views:
+                    logger.info(f"✅ [{current_done}/{total_views}] VERIFIED SUCCESS! IP: {thread_ip} | Watched: {actual_streamed:.1f}s")
                     msg = (
-                        f"✅ <b>View Completed [{current_done}/{total_views}]</b>\n"
-                        f"🧅 <b>IP:</b> <code>{thread_ip}</code>\n"
-                        f"⚡ <b>Watch:</b> {actual_watch_seconds}s (2x speed)\n"
-                        f"🎬 <b>Progress:</b> {played_time:.1f}s verified"
+                        f"✅ <b>View Verified [{current_done}/{total_views}]</b>\n"
+                        f"🧅 <b>IP:</b> <code>{thread_ip}</code> ({country})\n"
+                        f"🌍 <b>Timezone:</b> {tz_id}\n"
+                        f"⏱️ <b>Real Playback:</b> {actual_streamed:.1f}s (1.0x)"
                     )
                     self.tg.send_message(msg)
-
-                return True
+                    return True
+                else:
+                    logger.warning(f"[{view_idx}] ❌ FAILED VERIFICATION: Streamed only {actual_streamed:.1f}s, needed {required_minimum:.1f}s.")
+                    with self.lock:
+                        self.stats["failed_views"] += 1
+                    return False
 
             except Exception as e:
-                logger.error(f"[{view_idx}] Simulation error: {e}")
+                logger.error(f"[{view_idx}] Execution error: {e}")
                 if browser:
                     try:
                         browser.close()
@@ -331,24 +432,23 @@ class MultiThreadedViewBot:
                     self.stats["failed_views"] += 1
                 return False
 
-    def run_bulk(self, video_url: str, views: int = 5, watch_duration: float = 3.0):
+    def run_bulk(self, video_url: str, views: int = 5, watch_duration: float = 35.0):
         self.stats["start_time"] = datetime.now().isoformat()
         self.stats["total_views_requested"] = views
 
         video_id = extract_video_id(video_url)
         header_msg = (
-            f"🚀 <b>Bulk YouTube View Booster Started</b>\n"
+            f"🚀 <b>Rigorous YouTube View Booster Started</b>\n"
             f"🎬 <b>Video:</b> <code>{video_id}</code>\n"
             f"🎯 <b>Total Views:</b> {views}\n"
-            f"⚡ <b>Fast Duration:</b> ~{watch_duration}-{watch_duration + 2}s (2x playback)\n"
-            f"🧵 <b>Threads (Concurrency):</b> {self.concurrency} parallel browsers\n"
-            f"🧅 <b>IP Mode:</b> Multi-IP Tor Stream Isolation"
+            f"⏱️ <b>Target Watch Duration:</b> {watch_duration}s (1.0x real playback)\n"
+            f"🧵 <b>Parallel Threads:</b> {self.concurrency}\n"
+            f"🛡️ <b>Verification Mode:</b> Strict (Bot blocks / Stalls reported truthfully)"
         )
         self.tg.send_message(header_msg)
 
-        logger.info(f"Target Video ID: {video_id} | Total Views: {views} | Threads: {self.concurrency}")
+        logger.info(f"Target Video ID: {video_id} | Total Views: {views} | Target Watch Time: {watch_duration}s")
 
-        # ThreadPoolExecutor for concurrent multi-IP views
         with ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="ViewWorker") as executor:
             futures = []
             for i in range(1, views + 1):
@@ -358,26 +458,26 @@ class MultiThreadedViewBot:
                         view_idx=i,
                         total_views=views,
                         video_id=video_id,
-                        base_watch_time=watch_duration
+                        target_watch_time=watch_duration
                     )
                 )
-                # Small stagger delay between starting browser threads
-                time.sleep(random.uniform(0.5, 1.5))
+                time.sleep(random.uniform(1.0, 2.5))
 
-            # Wait for all views to finish
             for fut in as_completed(futures):
                 try:
                     fut.result()
                 except Exception as e:
-                    logger.error(f"Thread execution error: {e}")
+                    logger.error(f"Thread worker error: {e}")
 
         self.stats["end_time"] = datetime.now().isoformat()
+        unique_ips = len(set(self.stats["ips_used"]))
         summary_msg = (
-            f"🏁 <b>Bulk Boosting Finished!</b>\n\n"
-            f"📊 <b>Total Views:</b> {self.stats['total_views_requested']}\n"
-            f"✅ <b>Successful Views:</b> {self.stats['successful_views']}\n"
-            f"❌ <b>Failed Views:</b> {self.stats['failed_views']}\n"
-            f"🧅 <b>Unique Tor IPs Used:</b> {len(set(self.stats['ips_used']))}"
+            f"🏁 <b>Boosting Task Finished!</b>\n\n"
+            f"📊 <b>Total Attempted:</b> {self.stats['total_views_requested']}\n"
+            f"✅ <b>Verified Plays:</b> {self.stats['successful_views']}\n"
+            f"🛑 <b>Blocked by Bot Detection:</b> {self.stats['blocked_by_bot_detection']}\n"
+            f"❌ <b>Other Failures:</b> {self.stats['failed_views'] - self.stats['blocked_by_bot_detection']}\n"
+            f"🧅 <b>Unique Tor IPs Tested:</b> {unique_ips}"
         )
         self.tg.send_message(summary_msg)
         self._save_stats()
@@ -385,14 +485,14 @@ class MultiThreadedViewBot:
     def _save_stats(self):
         with open("bot_stats.json", "w", encoding="utf-8") as f:
             json.dump(self.stats, f, indent=2)
-        logger.info("Stats saved to bot_stats.json")
+        logger.info("Audit stats saved to bot_stats.json")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Multi-Threaded YouTube View Bot - Tor Stream Isolation")
+    parser = argparse.ArgumentParser(description="YouTube View Bot - Honest Verification Engine")
     parser.add_argument("--url", type=str, default="", help="YouTube video URL")
     parser.add_argument("--views", type=int, default=5, help="Number of views to boost")
-    parser.add_argument("--watch-time", type=float, default=3.0, help="Base watch time in seconds (e.g. 2.0 to 4.0)")
+    parser.add_argument("--watch-time", type=float, default=35.0, help="Target watch time in seconds (default: 35s)")
     parser.add_argument("--threads", type=int, default=3, help="Concurrent browser threads (default: 3)")
     parser.add_argument("--tor-control-port", type=int, default=9051)
     parser.add_argument("--tor-socks-port", type=int, default=9050)
@@ -404,7 +504,7 @@ def main():
     tg = TelegramReporter(token=args.telegram_token, chat_id=args.telegram_chat_id)
     tor = TorManager(control_port=args.tor_control_port, socks_port=args.tor_socks_port)
 
-    bot = MultiThreadedViewBot(
+    bot = RigorousYouTubeViewBot(
         tor_manager=tor,
         telegram_reporter=tg,
         concurrency=args.threads,

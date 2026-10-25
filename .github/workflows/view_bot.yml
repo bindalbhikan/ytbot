@@ -14,7 +14,7 @@ on:
       watch_time:
         description: 'Watch duration per view (seconds)'
         required: true
-        default: '3'
+        default: '35'
       threads:
         description: 'Concurrent Browser Threads (Multi-IP)'
         required: false
