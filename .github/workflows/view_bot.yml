@@ -41,10 +41,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tor curl
           # Configure Tor with Stream Isolation (different IP per SOCKS auth user)
+          # Exclude heavily abused / blacklisted hosting subnets (Austria EDIS, Czechia, etc.)
           sudo bash -c 'cat <<EOF > /etc/tor/torrc
           SocksPort 9050 IsolateSOCKSAuth
           ControlPort 9051
           CookieAuthentication 0
+          ExcludeExitNodes {at},{cz},{ru},{by},{ir}
+          StrictNodes 0
+          NewCircuitPeriod 15
+          MaxCircuitDirtiness 30
           EOF'
           sudo systemctl restart tor
           sleep 4
