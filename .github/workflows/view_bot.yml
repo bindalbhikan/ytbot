@@ -6,15 +6,19 @@ on:
       video_url:
         description: 'YouTube Video URL'
         required: true
-        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        default: 'https://www.youtube.com/watch?v=d2Wg5jdK5jE'
       views:
         description: 'Number of views to boost'
         required: true
-        default: '5'
+        default: '10'
       watch_time:
         description: 'Watch duration per view (seconds)'
         required: true
-        default: '35'
+        default: '3'
+      threads:
+        description: 'Concurrent Browser Threads (Multi-IP)'
+        required: false
+        default: '3'
       telegram_chat_id:
         description: 'Optional Telegram Chat ID override'
         required: false
@@ -32,19 +36,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Tor Service
+      - name: Set up Tor Service (Stream Isolation Multi-IP)
         run: |
           sudo apt-get update
-          sudo apt-get install -y tor
-          # Configure Tor ControlPort 9051 without password for automated rotation
+          sudo apt-get install -y tor curl
+          # Configure Tor with Stream Isolation (different IP per SOCKS auth user)
           sudo bash -c 'cat <<EOF > /etc/tor/torrc
-          SocksPort 9050
+          SocksPort 9050 IsolateSOCKSAuth
           ControlPort 9051
           CookieAuthentication 0
           EOF'
           sudo systemctl restart tor
-          sleep 5
-          # Verify Tor is active
+          sleep 4
+          # Verify Tor is operational
           curl --socks5-hostname 127.0.0.1:9050 https://api.ipify.org && echo ""
 
       - name: Set up Python
@@ -62,23 +66,26 @@ jobs:
         run: |
           playwright install chromium --with-deps
 
-      - name: Execute View Booster
+      - name: Execute Multi-Threaded View Booster
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ github.event.inputs.telegram_chat_id || github.event.client_payload.telegram_chat_id || secrets.TELEGRAM_CHAT_ID }}
         run: |
           TARGET_URL="${{ github.event.inputs.video_url || github.event.client_payload.video_url || '' }}"
-          TARGET_VIEWS="${{ github.event.inputs.views || github.event.client_payload.views || '5' }}"
-          TARGET_TIME="${{ github.event.inputs.watch_time || github.event.client_payload.watch_time || '35' }}"
+          TARGET_VIEWS="${{ github.event.inputs.views || github.event.client_payload.views || '10' }}"
+          TARGET_TIME="${{ github.event.inputs.watch_time || github.event.client_payload.watch_time || '3' }}"
+          TARGET_THREADS="${{ github.event.inputs.threads || github.event.client_payload.threads || '3' }}"
 
           echo "Target URL: $TARGET_URL"
           echo "Views: $TARGET_VIEWS"
           echo "Watch Time: $TARGET_TIME"
+          echo "Threads: $TARGET_THREADS"
 
           python core_bot.py \
             --url "$TARGET_URL" \
             --views "$TARGET_VIEWS" \
-            --watch-time "$TARGET_TIME"
+            --watch-time "$TARGET_TIME" \
+            --threads "$TARGET_THREADS"
 
       - name: Upload Bot Stats
         if: always()

@@ -49,14 +49,15 @@ export default {
           await sendTelegramMessage(
             botToken,
             chatId,
-            "⚠️ <b>Usage:</b>\n<code>/boost &lt;YouTube_URL&gt; [views] [watch_time_seconds]</code>\n\n<b>Example:</b>\n<code>/boost https://youtu.be/dQw4w9WgXcQ 10 35</code>"
+            "⚠️ <b>Usage:</b>\n<code>/boost &lt;YouTube_URL&gt; [views] [watch_time_seconds] [threads]</code>\n\n<b>Example:</b>\n<code>/boost https://youtu.be/d2Wg5jdK5jE 50 3 3</code>"
           );
           return new Response("OK", { status: 200 });
         }
 
         const videoUrl = parts[1];
         const views = parts[2] && !isNaN(parts[2]) ? parts[2] : "5";
-        const watchTime = parts[3] && !isNaN(parts[3]) ? parts[3] : "35";
+        const watchTime = parts[3] && !isNaN(parts[3]) ? parts[3] : "3";
+        const threads = parts[4] && !isNaN(parts[4]) ? parts[4] : "3";
 
         if (!videoUrl.includes("youtu")) {
           await sendTelegramMessage(botToken, chatId, "❌ <b>Error:</b> Invalid YouTube URL provided.");
@@ -76,7 +77,7 @@ export default {
         await sendTelegramMessage(
           botToken,
           chatId,
-          `⏳ <b>Dispatching to GitHub Actions...</b>\n\n🎬 <b>URL:</b> ${videoUrl}\n🎯 <b>Views:</b> ${views}\n⏱️ <b>Watch Time:</b> ${watchTime}s`
+          `⏳ <b>Dispatching Multi-Threaded Job...</b>\n\n🎬 <b>URL:</b> ${videoUrl}\n🎯 <b>Views:</b> ${views}\n⚡ <b>Fast Watch Time:</b> ~${watchTime}s (2x rate)\n🧵 <b>Parallel Threads:</b> ${threads} (Multi-IP)`
         );
 
         // Dispatch workflow via GitHub REST API
@@ -94,6 +95,7 @@ export default {
               video_url: videoUrl,
               views: views.toString(),
               watch_time: watchTime.toString(),
+              threads: threads.toString(),
               telegram_chat_id: chatId.toString()
             }
           })
