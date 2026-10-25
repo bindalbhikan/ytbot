@@ -14,14 +14,14 @@ import random
 import json
 import csv
 import re
+import socket
+import subprocess
 import argparse
 import logging
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
 import requests
-from stem import Signal
-from stem.control import Controller
 from playwright.sync_api import sync_playwright
 
 logging.basicConfig(
@@ -108,15 +108,20 @@ class TorManager:
     def rotate_ip(self) -> str:
         """Sends NEWNYM signal to Tor and returns the new public IP."""
         try:
-            with Controller.from_port(port=self.control_port) as controller:
-                if self.password:
-                    controller.authenticate(password=self.password)
-                else:
-                    controller.authenticate()
-                controller.signal(Signal.NEWNYM)
-                logger.info("Signal NEWNYM sent to Tor controller.")
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5)
+            s.connect(("127.0.0.1", self.control_port))
+            auth_cmd = f'AUTHENTICATE "{self.password}"\r\n' if self.password else 'AUTHENTICATE ""\r\n'
+            s.sendall(auth_cmd.encode('utf-8'))
+            resp = s.recv(1024).decode('utf-8', errors='ignore')
+            if "250" in resp:
+                s.sendall(b'SIGNAL NEWNYM\r\nQUIT\r\n')
+                logger.info("Signal NEWNYM sent to Tor ControlPort (circuit reset).")
+            else:
+                logger.warning(f"Tor ControlPort auth response: {resp.strip()}")
+            s.close()
         except Exception as e:
-            logger.warning(f"Could not connect to Tor control port: {e}. Checking IP anyway.")
+            logger.warning(f"Tor socket control error: {e}. Checking IP anyway.")
 
         # Wait for new circuit to establish
         time.sleep(8)
@@ -126,13 +131,27 @@ class TorManager:
 
     def get_current_ip(self) -> str:
         """Fetch current public IP using the Tor SOCKS5 proxy."""
+        # 1. Native curl fallback (fast & reliable on Ubuntu)
+        try:
+            cmd = [
+                "curl", "-s", "--socks5-hostname", f"127.0.0.1:{self.socks_port}",
+                "--max-time", "10", "https://api.ipify.org"
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+            ip = res.stdout.strip()
+            if ip and len(ip) <= 45 and ("." in ip or ":" in ip):
+                return ip
+        except Exception:
+            pass
+
+        # 2. Python requests with socks5h
         proxies = {
-            "http": self.socks_proxy,
-            "https": self.socks_proxy
+            "http": f"socks5h://127.0.0.1:{self.socks_port}",
+            "https": f"socks5h://127.0.0.1:{self.socks_port}"
         }
         for provider in ["https://api.ipify.org", "https://icanhazip.com", "https://check.torproject.org/api/ip"]:
             try:
-                res = requests.get(provider, proxies=proxies, timeout=15)
+                res = requests.get(provider, proxies=proxies, timeout=10)
                 if res.status_code == 200:
                     text = res.text.strip()
                     if "IP" in text and "{" in text:
@@ -140,7 +159,9 @@ class TorManager:
                             return json.loads(text).get("IP", "Unknown")
                         except Exception:
                             pass
-                    return text.split("\n")[0].strip()
+                    ip = text.split("\n")[0].strip()
+                    if ip:
+                        return ip
             except Exception:
                 continue
         return "Unknown"
